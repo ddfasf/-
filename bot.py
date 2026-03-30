@@ -69,7 +69,7 @@ async def on_ready():
 # ==========================
 # 음악 명령어
 # ==========================
-@tree.command(name="재생", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="노래재생", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(검색어="노래 제목 또는 링크")
 async def play(interaction: discord.Interaction, 검색어: str):
     if not interaction.user.voice:
@@ -89,7 +89,7 @@ async def play(interaction: discord.Interaction, 검색어: str):
     if not vc.is_playing(): await play_next(interaction)
     await interaction.followup.send(f"🎵 추가됨: {title}")
 
-@tree.command(name="스킵", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="노래스킵", guild=discord.Object(id=GUILD_ID))
 async def skip(interaction: discord.Interaction):
     vc = interaction.guild.voice_client
     if not vc or not vc.is_playing():
@@ -98,7 +98,7 @@ async def skip(interaction: discord.Interaction):
     vc.stop()
     await interaction.response.send_message("⏭️ 스킵 완료")
 
-@tree.command(name="정지", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="노래재생중지", guild=discord.Object(id=GUILD_ID))
 async def stop(interaction: discord.Interaction):
     vc = interaction.guild.voice_client
     if vc:
@@ -109,7 +109,7 @@ async def stop(interaction: discord.Interaction):
         await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="/재생 | 민수봇"))
         await interaction.response.send_message("⏹️ 정지 완료")
 
-@tree.command(name="대기열", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="노래재생목록", guild=discord.Object(id=GUILD_ID))
 async def queue_list(interaction: discord.Interaction):
     guild_id = interaction.guild.id
     if guild_id not in queues or not queues[guild_id]:
@@ -118,7 +118,7 @@ async def queue_list(interaction: discord.Interaction):
     msg = "\n".join(f"{i+1}. {title}" for i, (title, _) in enumerate(queues[guild_id]))
     await interaction.response.send_message(f"📜 대기열:\n{msg}")
 
-@tree.command(name="볼륨", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="노래볼륨", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(레벨="0~200")
 async def set_volume(interaction: discord.Interaction, 레벨: int):
     if not interaction.user.guild_permissions.manage_guild:
