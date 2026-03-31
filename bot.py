@@ -271,14 +271,18 @@ GUILD_ID = 1484915814187401259
 async def on_ready():
     print("🔥 실행됨")
 
-    guild = discord.Object(id=GUILD_ID)
-
     try:
-        tree.clear_commands(guild=guild)
-        await tree.sync(guild=guild)
-        await tree.sync()
-        print("✅ 명령어 초기화 완료")
+        # 🔥 글로벌 명령어 삭제
+        client.tree.clear_commands(guild=None)
+        await client.tree.sync()
+
+        # 🔥 길드 명령어 삭제
+        guild = discord.Object(id=GUILD_ID)
+        client.tree.clear_commands(guild=guild)
+        await client.tree.sync(guild=guild)
+
+        print("✅ 명령어 완전 초기화 완료")
     except Exception as e:
-        print(e)
+        print("❌", e)
 
 client.run(os.environ.get("TOKEN"))
