@@ -5,10 +5,11 @@ import asyncio
 import time
 import json
 import requests
+import os
 
-TOKEN = "MTQ4ODE4MjA4OTk3MDA5MDE0NQ.GJ13QV.G-FTejkv4V6nWdvOOWlZ6xcYCwUNW10_TDt388"
+TOKEN = os.environ.get("TOKEN")
 GUILD_ID = 1484915814187401259
-FFMPEG_PATH = r"C:\ffmpeg\bin\ffmpeg.exe"
+FFMPEG_PATH = "ffmpeg"
 GENIUS_TOKEN = "여기에_Genius_API"
 
 intents = discord.Intents.default()
