@@ -232,8 +232,8 @@ async def on_ready():
     client.add_view(Panel())
 
     try:
-        await tree.sync()
-        print("✅ 글로벌 명령어 등록 완료")
+        synced = await tree.sync()
+        print(f"✅ 글로벌 명령어 {len(synced)}개 등록됨")
     except Exception as e:
         print("❌", e)
 
