@@ -16,9 +16,16 @@ tree = app_commands.CommandTree(client)
 queues = {}
 now_playing = {}
 start_times = {}
-history = {}
 
 SETTINGS_FILE = "settings.json"
+
+# 🎬 귀여운 GIF 리스트
+GIFS = [
+    "https://media.giphy.com/media/ZVik7pBtu9dNS/giphy.gif",
+    "https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif",
+    "https://media.giphy.com/media/l3vRlT2k2L35Cnn5C/giphy.gif",
+    "https://media.giphy.com/media/ICOgUNjpvO0PC/giphy.gif"
+]
 
 def load_settings():
     try:
@@ -45,6 +52,7 @@ ydl_opts = {
     "quiet": True,
     "noplaylist": True,
     "ignoreerrors": True,
+    "cookiefile": "cookies.txt",  # 🔥 필수
     "http_headers": {"User-Agent": "Mozilla/5.0"},
 }
 
@@ -58,29 +66,22 @@ async def extract(q):
 # ================= 패널 UI =================
 def make_panel_embed(gid):
     song = now_playing.get(gid)
-    status = "⏹ 대기중"
-
-    if song:
-        status = "▶️ 재생중"
 
     emb = discord.Embed(
         title="🎧 MUSIC STATION",
-        description="버튼으로 음악을 선택하세요",
+        description="```yaml\n귀여운 음악봇 🎶\n버튼 눌러서 노래 틀어!\n```",
         color=0x1DB954
     )
 
-    emb.add_field(name="📡 상태", value=status, inline=True)
-    emb.add_field(
-        name="🎵 현재곡",
-        value=song["title"] if song else "없음",
-        inline=True
-    )
+    emb.add_field(name="📡 상태", value="▶️ 재생중" if song else "⏹ 대기중", inline=True)
+    emb.add_field(name="🎵 현재곡", value=song["title"] if song else "없음", inline=True)
 
-    emb.add_field(name="🔎 검색", value="노래 찾기", inline=True)
-    emb.add_field(name="🔥 인기", value="추천곡", inline=True)
+    emb.add_field(name="🔥 인기", value="요즘 핫한 음악", inline=True)
     emb.add_field(name="🏆 빌보드", value="TOP 차트", inline=True)
-    emb.add_field(name="🎬 매드무비", value="플레이리스트", inline=True)
-    emb.add_field(name="🆕 최신곡", value="최근곡", inline=True)
+    emb.add_field(name="🎬 매드무비", value="감성 플레이리스트", inline=True)
+    emb.add_field(name="🆕 최신곡", value="최근 음악", inline=True)
+
+    emb.set_image(url=random.choice(GIFS))  # 🔥 GIF 추가
 
     return emb
 
@@ -92,14 +93,16 @@ def make_player_embed(song, elapsed):
 
     emb = discord.Embed(
         title="🎧 NOW PLAYING",
-        description=f"[{song['title']}]({song['webpage_url']})",
+        description=f"🎵 [{song['title']}]({song['webpage_url']})",
         color=0x1DB954
     )
 
-    emb.add_field(name="⏱", value=f"{bar}\n{elapsed}/{d}s", inline=False)
+    emb.add_field(name="⏱ 진행", value=f"{bar}\n{elapsed}/{d}s", inline=False)
 
     if song.get("thumbnail"):
-        emb.set_thumbnail(url=song["thumbnail"])
+        emb.set_image(url=song["thumbnail"])
+
+    emb.set_footer(text="🎶 Playing...")
 
     return emb
 
@@ -112,26 +115,21 @@ class Panel(discord.ui.View):
     async def search(self, i, b):
         await i.response.send_modal(Search())
 
-# ================= 플레이어 =================
-class Player(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+    @discord.ui.button(label="🔥 인기", style=discord.ButtonStyle.primary, custom_id="popular")
+    async def popular(self, i, b):
+        await send_list(i, "kpop 인기차트")
 
-    @discord.ui.button(label="⏸", style=discord.ButtonStyle.primary, custom_id="pause")
-    async def pause(self, i, b):
-        vc = i.guild.voice_client
-        if vc.is_playing():
-            vc.pause()
-            b.label = "▶️"
-        else:
-            vc.resume()
-            b.label = "⏸"
-        await i.response.edit_message(view=self)
+    @discord.ui.button(label="🏆 빌보드", style=discord.ButtonStyle.primary, custom_id="billboard")
+    async def billboard(self, i, b):
+        await send_list(i, "billboard hot 100")
 
-    @discord.ui.button(label="⏭", style=discord.ButtonStyle.secondary, custom_id="skip")
-    async def skip(self, i, b):
-        i.guild.voice_client.stop()
-        await i.response.defer()
+    @discord.ui.button(label="🎬 매드무비", style=discord.ButtonStyle.secondary, custom_id="mad")
+    async def mad(self, i, b):
+        await send_list(i, "anime mad music")
+
+    @discord.ui.button(label="🆕 최신곡", style=discord.ButtonStyle.secondary, custom_id="latest")
+    async def latest(self, i, b):
+        await send_list(i, "latest kpop songs")
 
 # ================= 검색 =================
 class Search(discord.ui.Modal, title="검색"):
@@ -139,44 +137,47 @@ class Search(discord.ui.Modal, title="검색"):
 
     async def on_submit(self, i):
         await i.response.defer(ephemeral=True)
+        await send_list(i, self.query)
 
-        data = await extract(f"ytsearch5:{self.query}")
+# ================= 리스트 =================
+async def send_list(i, query):
+    data = await extract(f"ytsearch5:{query}")
 
-        if not data or "entries" not in data:
-            return await i.followup.send("❌ 검색 실패", ephemeral=True)
+    if not data or "entries" not in data:
+        return await i.followup.send("❌ 불러오기 실패", ephemeral=True)
 
-        v = discord.ui.View()
+    v = discord.ui.View()
 
-        for r in data["entries"]:
-            if not r:
-                continue
+    for r in data["entries"]:
+        if not r:
+            continue
 
-            title = r.get("title", "제목없음")
+        title = r.get("title", "제목없음")
 
-            b = discord.ui.Button(label=title[:20])
+        b = discord.ui.Button(label=title[:20])
 
-            async def cb(inter, r=r):
-                await inter.response.defer(ephemeral=True)
+        async def cb(inter, r=r):
+            await inter.response.defer(ephemeral=True)
 
-                if not inter.user.voice:
-                    return await inter.followup.send("❌ 음성채널 들어가", ephemeral=True)
+            if not inter.user.voice:
+                return await inter.followup.send("❌ 음성채널 들어가", ephemeral=True)
 
-                k = inter.guild.id
-                queues.setdefault(k, []).append(r)
+            k = inter.guild.id
+            queues.setdefault(k, []).append(r)
 
-                vc = inter.guild.voice_client
-                if not vc:
-                    vc = await inter.user.voice.channel.connect()
+            vc = inter.guild.voice_client
+            if not vc:
+                vc = await inter.user.voice.channel.connect()
 
-                if not vc.is_playing():
-                    await play_next(inter)
+            if not vc.is_playing():
+                await play_next(inter)
 
-                await inter.followup.send(f"✅ 추가됨", ephemeral=True)
+            await inter.followup.send("✅ 추가됨", ephemeral=True)
 
-            b.callback = cb
-            v.add_item(b)
+        b.callback = cb
+        v.add_item(b)
 
-        await i.followup.send("🎬 검색 결과", view=v, ephemeral=True)
+    await i.followup.send(f"🎬 {query}", view=v, ephemeral=True)
 
 # ================= 재생 =================
 async def play_next(i):
@@ -189,9 +190,9 @@ async def play_next(i):
         return
 
     song = queues[k].pop(0)
-
     data = await extract(song["webpage_url"])
-    if not data:
+
+    if not data or "url" not in data:
         return await play_next(i)
 
     stream_url = data["url"]
@@ -208,8 +209,7 @@ async def play_next(i):
 
     vc.play(source, after=after)
 
-    msg = await i.followup.send(embed=make_player_embed(song, 0), view=Player(), ephemeral=True)
-
+    msg = await i.followup.send(embed=make_player_embed(song, 0), ephemeral=True)
     client.loop.create_task(update_player(msg, k))
     await update_panel(k)
 
@@ -218,10 +218,12 @@ async def update_player(msg, gid):
     while gid in now_playing:
         s = now_playing[gid]
         e = int(time.time() - start_times[gid])
+
         try:
             await msg.edit(embed=make_player_embed(s, e))
         except:
             break
+
         await asyncio.sleep(2)
 
 async def update_panel(gid):
@@ -230,6 +232,7 @@ async def update_panel(gid):
         return
 
     ch = client.get_channel(s["music_channel"])
+
     try:
         msg = await ch.fetch_message(s["panel_msg"])
         await msg.edit(embed=make_panel_embed(gid), view=Panel())
@@ -247,7 +250,6 @@ async def send_panel(ch, gid):
             return
         except:
             s["panel_msg"] = None
-            save_settings(settings)
 
     msg = await ch.send(embed=make_panel_embed(gid), view=Panel())
 
@@ -276,7 +278,6 @@ async def on_ready():
     print("🔥 실행됨")
 
     client.add_view(Panel())
-    client.add_view(Player())
 
     await tree.sync()
 
