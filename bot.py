@@ -272,16 +272,16 @@ async def on_ready():
     print("🔥 실행됨")
 
     try:
-        # 🔥 글로벌 명령어 삭제
-        client.tree.clear_commands(guild=None)
-        await client.tree.sync()
+        # 글로벌 삭제
+        tree.clear_commands(guild=None)
+        await tree.sync()
 
-        # 🔥 길드 명령어 삭제
+        # 길드 삭제
         guild = discord.Object(id=GUILD_ID)
-        client.tree.clear_commands(guild=guild)
-        await client.tree.sync(guild=guild)
+        tree.clear_commands(guild=guild)
+        await tree.sync(guild=guild)
 
-        print("✅ 명령어 완전 초기화 완료")
+        print("✅ 명령어 초기화 완료")
     except Exception as e:
         print("❌", e)
 
