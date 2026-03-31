@@ -251,16 +251,30 @@ async def setdj(i:discord.Interaction,role:discord.Role):
     await i.response.send_message("✅ DJ 설정됨",ephemeral=True)
 
 # ================= 실행 =================
+GUILD_ID = 1484915814187401259  # 👈 니 서버 ID 넣어라
+
 @client.event
 async def on_ready():
     print("🔥 완전체 실행됨")
 
-    for gid,data in settings.items():
-        ch_id=data.get("music_channel")
+    guild = discord.Object(id=GUILD_ID)
+
+    try:
+        tree.clear_commands(guild=guild)   # 💀 옛날 명령어 삭제
+        await tree.sync(guild=guild)       # 🔥 다시 등록
+        print("✅ 명령어 초기화 완료")
+    except Exception as e:
+        print("❌ sync 에러:", e)
+
+    # 🔁 패널 복구
+    for gid, data in settings.items():
+        ch_id = data.get("music_channel")
         if ch_id:
-            ch=client.get_channel(ch_id)
+            ch = client.get_channel(ch_id)
             if ch:
-                try: await send_panel(ch)
-                except: pass
+                try:
+                    await send_panel(ch)
+                except:
+                    pass
 
 client.run(os.environ.get("TOKEN"))
