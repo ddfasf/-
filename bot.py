@@ -16,8 +16,8 @@ tree = app_commands.CommandTree(client)
 queues = {}
 now_playing = {}
 start_times = {}
-loop_state = {}
 paused = {}
+loop_state = {}
 
 SETTINGS_FILE = "settings.json"
 
@@ -56,7 +56,6 @@ ydl_opts = {
     "fragment_retries": 10,
     "sleep_interval_requests": 1,
     "sleep_interval": 1,
-    "max_sleep_interval": 2,
     "http_headers": {"User-Agent": "Mozilla/5.0"},
     "extractor_args": {"youtube": {"player_client": ["web"]}}
 }
@@ -70,149 +69,111 @@ async def extract(q):
 
 def make_embed(song, elapsed, gid, state="▶"):
     d = song.get("duration", 180)
-    bar_len = 18
-    filled = int(bar_len * elapsed / max(d, 1))
-    bar = "▰"*filled + "▱"*(bar_len-filled)
-
-    title_map = {
-        "▶": "🎧 NOW PLAYING",
-        "⏸": "⏸ PAUSED",
-        "⏹": "⏹ STOPPED"
-    }
+    filled = int(18 * elapsed / max(d, 1))
+    bar = "▰"*filled + "▱"*(18-filled)
 
     emb = discord.Embed(
-        title=title_map[state],
-        description=f"🎵 [{song['title']}]({song['webpage_url']})",
-        color=0x1DB954 if state != "⏹" else 0xFF5555
+        title="🎧 NOW PLAYING" if state=="▶" else "⏸ PAUSED",
+        description=f"[{song['title']}]({song['webpage_url']})",
+        color=0x1DB954
     )
 
-    emb.add_field(name="⏱ 진행", value=f"{bar}\n{elapsed}/{d}s", inline=False)
+    emb.add_field(name="⏱", value=f"{bar}\n{elapsed}/{d}s", inline=False)
 
     q = queues.get(gid, [])
-    if q:
-        emb.add_field(name="📀 NEXT UP", value=f"🎵 {q[0]['title']}", inline=False)
-    else:
-        emb.add_field(name="📀 NEXT UP", value="없음", inline=False)
+    emb.add_field(name="📀 NEXT UP", value=q[0]["title"] if q else "없음", inline=False)
 
     emb.set_thumbnail(url=song.get("thumbnail"))
     emb.set_image(url=random.choice(GIFS))
-    emb.set_footer(text="Spotify Style Player")
-
     return emb
 
 def panel_embed(state="대기중"):
     emb = discord.Embed(
-        title="🎧 MUSIC CONTROL PANEL",
-        description="🎵 버튼으로 음악을 재생하세요",
+        title="🎧 MUSIC PANEL",
+        description="버튼으로 조작",
         color=0x1DB954
     )
-    emb.add_field(name="🎶 상태", value=state, inline=False)
+    emb.add_field(name="상태", value=state)
     emb.set_image(url=random.choice(GIFS))
     return emb
 
 async def update(msg, gid):
     while gid in now_playing:
-        s = now_playing[gid]
-
-        if paused.get(gid):
-            await msg.edit(embed=make_embed(s, int(time.time()-start_times[gid]), gid, "⏸"))
-            await asyncio.sleep(2)
-            continue
-
+        song = now_playing[gid]
         elapsed = int(time.time() - start_times[gid])
-        await msg.edit(embed=make_embed(s, elapsed, gid, "▶"))
+
+        state = "⏸" if paused.get(gid) else "▶"
+        try:
+            await msg.edit(embed=make_embed(song, elapsed, gid, state))
+        except:
+            break
+
         await asyncio.sleep(2)
 
+# 🎨 버튼 애니메이션 UI
 class Panel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(
-        label="검색",
-        emoji="🎵",
-        style=discord.ButtonStyle.success,
-        custom_id="music_search"
-    )
-    async def search(self, i, b):
-        await i.response.send_modal(Search())
+    def highlight(self, btn):
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.style = discord.ButtonStyle.secondary
+        btn.style = discord.ButtonStyle.success
 
-    @discord.ui.button(
-        label="재생/정지",
-        emoji="⏯",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music_pause"
-    )
-    async def pause(self, i, b):
+    @discord.ui.button(label="검색", style=discord.ButtonStyle.secondary, custom_id="search")
+    async def search(self, i, btn):
+        self.highlight(btn)
+        await i.response.edit_message(view=self)
+        await i.followup.send_modal(Search())
+
+    @discord.ui.button(label="⏯", style=discord.ButtonStyle.secondary, custom_id="pause")
+    async def pause(self, i, btn):
         vc = i.guild.voice_client
         gid = i.guild.id
 
         if not vc or gid not in now_playing:
             return await i.response.send_message("❌ 재생중 아님", ephemeral=True)
 
-        s = get_settings(gid)
-        msg = await i.channel.fetch_message(s["panel_msg"])
+        self.highlight(btn)
 
         if vc.is_playing():
             vc.pause()
             paused[gid] = True
-            await msg.edit(embed=make_embed(now_playing[gid], int(time.time()-start_times[gid]), gid, "⏸"))
-            await i.response.send_message("⏸ 일시정지", ephemeral=True)
         else:
             vc.resume()
             paused[gid] = False
             start_times[gid] = time.time()
-            await msg.edit(embed=make_embed(now_playing[gid], 0, gid, "▶"))
-            await i.response.send_message("▶️ 재생", ephemeral=True)
 
-    @discord.ui.button(
-        label="스킵",
-        emoji="⏭",
-        style=discord.ButtonStyle.primary,
-        custom_id="music_skip"
-    )
-    async def skip(self, i, b):
+        await i.response.edit_message(view=self)
+
+    @discord.ui.button(label="⏭", style=discord.ButtonStyle.secondary, custom_id="skip")
+    async def skip(self, i, btn):
+        self.highlight(btn)
         vc = i.guild.voice_client
         if vc:
             vc.stop()
-        await i.response.send_message("⏭ 스킵", ephemeral=True)
+        await i.response.edit_message(view=self)
 
-    @discord.ui.button(
-        label="큐",
-        emoji="📀",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music_queue"
-    )
-    async def queue(self, i, b):
+    @discord.ui.button(label="큐", style=discord.ButtonStyle.secondary, custom_id="queue")
+    async def queue(self, i, btn):
+        self.highlight(btn)
         q = queues.get(i.guild.id, [])
-        if not q:
-            return await i.response.send_message("없음", ephemeral=True)
+        txt = "\n".join([x["title"] for x in q[:10]]) or "없음"
+        await i.response.send_message(txt, ephemeral=True)
 
-        emb = discord.Embed(title="📀 큐", color=0x1DB954)
-        for idx, x in enumerate(q[:10]):
-            emb.add_field(name=f"{idx+1}", value=x["title"], inline=False)
-
-        await i.response.send_message(embed=emb, ephemeral=True)
-
-    @discord.ui.button(
-        label="셔플",
-        emoji="🔀",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music_shuffle"
-    )
-    async def shuffle(self, i, b):
+    @discord.ui.button(label="🔀", style=discord.ButtonStyle.secondary, custom_id="shuffle")
+    async def shuffle(self, i, btn):
+        self.highlight(btn)
         random.shuffle(queues.get(i.guild.id, []))
-        await i.response.send_message("🔀 셔플 완료", ephemeral=True)
+        await i.response.edit_message(view=self)
 
-    @discord.ui.button(
-        label="반복",
-        emoji="🔁",
-        style=discord.ButtonStyle.secondary,
-        custom_id="music_loop"
-    )
-    async def loop(self, i, b):
+    @discord.ui.button(label="🔁", style=discord.ButtonStyle.secondary, custom_id="loop")
+    async def loop(self, i, btn):
+        self.highlight(btn)
         gid = i.guild.id
         loop_state[gid] = not loop_state.get(gid, False)
-        await i.response.send_message(f"🔁 {'켜짐' if loop_state[gid] else '꺼짐'}", ephemeral=True)
+        await i.response.edit_message(view=self)
 
 class Search(discord.ui.Modal, title="검색"):
     query = discord.ui.TextInput(label="검색어")
@@ -221,11 +182,9 @@ class Search(discord.ui.Modal, title="검색"):
         await i.response.defer(ephemeral=True)
 
         data = await extract(f"ytsearch5:{self.query}")
-        res = data["entries"]
-
         v = discord.ui.View(timeout=60)
 
-        for r in res:
+        for r in data["entries"]:
             b = discord.ui.Button(label=r["title"][:20])
 
             async def cb(inter, r=r):
@@ -256,12 +215,11 @@ async def play_next(i):
     vc = i.guild.voice_client
     ch = i.channel
     s = get_settings(k)
-
     msg = await ch.fetch_message(s["panel_msg"])
 
     if not queues.get(k):
         now_playing.pop(k, None)
-        await msg.edit(embed=panel_embed("대기중"), view=Panel())
+        await msg.edit(embed=panel_embed(), view=Panel())
         return
 
     song = queues[k].pop(0)
@@ -275,38 +233,31 @@ async def play_next(i):
     start_times[k] = time.time()
     paused[k] = False
 
-    source = discord.FFmpegPCMAudio(
-        stream_url,
-        options="-vn -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
-    )
+    source = discord.FFmpegPCMAudio(stream_url, options="-vn -reconnect 1 -reconnect_streamed 1")
 
     def after(e):
         if loop_state.get(k):
             queues.setdefault(k, []).insert(0, song)
-        fut = asyncio.run_coroutine_threadsafe(play_next(i), client.loop)
-        try: fut.result()
-        except: pass
+        asyncio.run_coroutine_threadsafe(play_next(i), client.loop)
 
     vc.play(source, after=after)
 
-    await msg.edit(embed=make_embed(song, 0, k), view=None)
+    await msg.edit(embed=make_embed(song, 0, k), view=Panel())
     client.loop.create_task(update(msg, k))
 
 async def send_panel(ch, gid):
     s = get_settings(gid)
-
-    emb = panel_embed("대기중")
-    view = Panel()
+    emb = panel_embed()
 
     if s.get("panel_msg"):
         try:
             msg = await ch.fetch_message(s["panel_msg"])
-            await msg.edit(embed=emb, view=view)
+            await msg.edit(embed=emb, view=Panel())
             return
         except:
             pass
 
-    msg = await ch.send(embed=emb, view=view)
+    msg = await ch.send(embed=emb, view=Panel())
     s["panel_msg"] = msg.id
     save_settings(settings)
 
@@ -338,13 +289,8 @@ async def on_ready():
         print("❌", e)
 
     for gid, data in settings.items():
-        ch_id = data.get("music_channel")
-        if ch_id:
-            ch = client.get_channel(ch_id)
-            if ch:
-                try:
-                    await send_panel(ch, int(gid))
-                except:
-                    pass
+        ch = client.get_channel(data.get("music_channel"))
+        if ch:
+            await send_panel(ch, int(gid))
 
 client.run(os.environ.get("TOKEN"))
