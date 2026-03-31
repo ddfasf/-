@@ -38,6 +38,13 @@ def get_settings(gid):
         "panel_msg": None
     })
 
+# 🎬 GIF 리스트
+GIFS = [
+    "https://media.giphy.com/media/ZVik7pBtu9dNS/giphy.gif",
+    "https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif",
+    "https://media.giphy.com/media/l3vRlT2k2L35Cnn5C/giphy.gif"
+]
+
 # ================= yt-dlp =================
 ydl_opts = {
     "format": "bestaudio/best",
@@ -50,6 +57,46 @@ async def extract(q):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(q, download=False)
     return await loop.run_in_executor(None, run)
+
+# ================= Spotify 스타일 UI =================
+def make_embed(song, elapsed):
+    d = song.get("duration", 180)
+
+    bar_len = 18
+    filled = int(bar_len * elapsed / max(d, 1))
+    bar = "▰"*filled + "▱"*(bar_len-filled)
+
+    emb = discord.Embed(
+        title="🎧 NOW PLAYING",
+        description=f"🎵 [{song['title']}]({song['webpage_url']})",
+        color=0x1DB954  # Spotify 색
+    )
+
+    emb.add_field(name="⏱ 진행", value=f"{bar}\n{elapsed}/{d}s", inline=False)
+
+    # 썸네일 (작은 앨범)
+    emb.set_thumbnail(url=song.get("thumbnail"))
+
+    # 큰 앨범 이미지 (Spotify 느낌)
+    emb.set_image(url=song.get("thumbnail"))
+
+    # 애니메이션 GIF
+    emb.set_footer(text="🎶 Spotify Style UI")
+    emb.set_image(url=random.choice(GIFS))
+
+    return emb
+
+async def update(msg, gid):
+    while gid in now_playing:
+        s = now_playing[gid]
+        elapsed = int(time.time() - start_times[gid])
+
+        try:
+            await msg.edit(embed=make_embed(s, elapsed))
+        except:
+            break
+
+        await asyncio.sleep(2)
 
 # ================= 패널 =================
 class Panel(discord.ui.View):
@@ -66,8 +113,11 @@ class Panel(discord.ui.View):
         if not q:
             return await i.response.send_message("없음", ephemeral=True)
 
-        txt = "\n".join([x["title"] for x in q[:10]])
-        await i.response.send_message(txt, ephemeral=True)
+        emb = discord.Embed(title="📀 QUEUE", color=0x1DB954)
+        for idx, x in enumerate(q[:10]):
+            emb.add_field(name=f"{idx+1}.", value=x["title"], inline=False)
+
+        await i.response.send_message(embed=emb, ephemeral=True)
 
 # ================= 검색 =================
 class Search(discord.ui.Modal, title="검색"):
@@ -131,12 +181,8 @@ async def play_next(i):
 
     vc.play(source, after=after)
 
-    emb = discord.Embed(
-        title="🎧 NOW PLAYING",
-        description=f"[{song['title']}]({song['webpage_url']})"
-    )
-
-    await i.channel.send(embed=emb)
+    msg = await i.channel.send(embed=make_embed(song, 0))
+    client.loop.create_task(update(msg, k))
 
 # ================= 패널 생성 =================
 async def send_panel(ch, gid):
@@ -151,8 +197,10 @@ async def send_panel(ch, gid):
 
     emb = discord.Embed(
         title="🎧 MUSIC PANEL",
-        description="버튼으로 음악 조작"
+        description="🎵 버튼으로 음악을 재생하세요",
+        color=0x1DB954
     )
+    emb.set_image(url=random.choice(GIFS))
 
     msg = await ch.send(embed=emb, view=Panel())
 
@@ -160,9 +208,7 @@ async def send_panel(ch, gid):
     save_settings(settings)
 
 # ================= setup =================
-GUILD_ID = 1484915814187401259
-
-@tree.command(name="setup", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="setup")
 async def setup(i: discord.Interaction):
     g = i.guild
 
@@ -186,7 +232,7 @@ async def on_ready():
     client.add_view(Panel())
 
     try:
-        await tree.sync()  # 🔥 글로벌 sync
+        await tree.sync()
         print("✅ 글로벌 명령어 등록 완료")
     except Exception as e:
         print("❌", e)
