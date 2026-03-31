@@ -21,24 +21,66 @@ start_time = {}
 current_track = {}
 preloaded = {}
 
-# ================= yt-dlp =================
-YDL_OPTS = {
-    'format': 'bestaudio/best',
-    'quiet': True,
-    'noplaylist': True,
-    'default_search': 'ytsearch',
-    'ignoreerrors': True,
-}
+# ================= 프록시 =================
+PROXIES = [
+    None,  # 기본
+    # "http://user:pass@ip:port",
+]
 
-async def safe_extract(q):
+def get_proxy():
+    return random.choice(PROXIES)
+
+# ================= yt-dlp =================
+def get_ydl_opts():
+    return {
+        'format': 'bestaudio/best',
+        'quiet': True,
+        'noplaylist': True,
+        'ignoreerrors': True,
+        'default_search': 'ytsearch',
+
+        'cookiefile': 'cookies.txt',
+        'nocheckcertificate': True,
+        'geo_bypass': True,
+        'proxy': get_proxy(),
+
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0'
+        },
+
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android', 'web']
+            }
+        }
+    }
+
+async def safe_extract(query):
     loop = asyncio.get_event_loop()
-    def run():
-        with yt_dlp.YoutubeDL(YDL_OPTS) as ydl:
-            return ydl.extract_info(q, download=False)
+
+    def run(opts):
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(query, download=False)
+
     try:
-        return await loop.run_in_executor(None, run)
+        return await loop.run_in_executor(None, lambda: run(get_ydl_opts()))
     except:
+        try:
+            return await loop.run_in_executor(None, lambda: run({'default_search': 'ytsearch'}))
+        except:
+            return None
+
+async def get_stream_url(url):
+    data = await safe_extract(url)
+    if not data:
         return None
+
+    if 'formats' in data:
+        for f in data['formats']:
+            if f.get('acodec') != 'none':
+                return f['url']
+
+    return data.get('url')
 
 # ================= 기본 =================
 def get_key(i):
@@ -78,12 +120,12 @@ async def seek(i, percent):
     dur = info.get("duration", 180)
     t = int(dur * percent)
 
-    data = await safe_extract(info['webpage_url'])
-    if not data: return
+    stream = await get_stream_url(info['webpage_url'])
+    if not stream: return
 
     src = discord.PCMVolumeTransformer(
         discord.FFmpegPCMAudio(
-            data['url'],
+            stream,
             executable=FFMPEG_PATH,
             before_options=f"-ss {t}"
         ), volume=0
@@ -99,16 +141,18 @@ async def seek(i, percent):
 # ================= UI =================
 class SeekUI(discord.ui.Select):
     def __init__(self):
-        super().__init__(placeholder="🎚 이동",
-        options=[discord.SelectOption(label=f"{i*10}%",value=str(i/10)) for i in range(11)],
-        custom_id="seek")
+        super().__init__(
+            placeholder="🎚 재생 위치 이동",
+            options=[discord.SelectOption(label=f"{i*10}%", value=str(i/10)) for i in range(11)],
+            custom_id="seek"
+        )
 
-    async def callback(self,i):
+    async def callback(self, i):
         await i.response.defer()
-        await seek(i,float(self.values[0]))
+        await seek(i, float(self.values[0]))
 
 class ControlView(discord.ui.View):
-    def __init__(self,state="play"):
+    def __init__(self, state="play"):
         super().__init__(timeout=None)
 
         emoji = "⏸️" if state=="play" else "▶️"
@@ -117,198 +161,214 @@ class ControlView(discord.ui.View):
         btn.callback = self.pause
         self.add_item(btn)
 
-        for e,cb,cid in [
-            ("⏮️",self.back,"back"),
-            ("⏭️",self.skip,"skip")
+        for e, cb, cid in [
+            ("⏮️", self.back, "back"),
+            ("⏭️", self.skip, "skip")
         ]:
-            b = discord.ui.Button(emoji=e,style=discord.ButtonStyle.secondary,custom_id=cid)
+            b = discord.ui.Button(emoji=e, style=discord.ButtonStyle.secondary, custom_id=cid)
             b.callback = cb
             self.add_item(b)
 
         self.add_item(SeekUI())
 
-    async def pause(self,i):
-        vc=i.guild.voice_client
+    async def pause(self, i):
+        vc = i.guild.voice_client
         vc.pause() if vc.is_playing() else vc.resume()
         await i.response.defer()
 
-    async def skip(self,i):
-        vc=i.guild.voice_client
-        await fade(vc,1,0)
+    async def skip(self, i):
+        vc = i.guild.voice_client
+        await fade(vc, 1, 0)
         vc.stop()
         await i.response.defer()
 
-    async def back(self,i):
-        await seek(i,0.1)
+    async def back(self, i):
+        await seek(i, 0.1)
 
 # ================= 프리로드 =================
 async def preload_next(i):
     key = get_key(i)
     if not queues.get(key): return
-
     next_track = queues[key][0]
-    data = await safe_extract(next_track['webpage_url'])
-    if data:
-        preloaded[key] = data
+    stream = await get_stream_url(next_track['webpage_url'])
+    if stream:
+        preloaded[key] = stream
 
 # ================= 음악 =================
-async def add_queue(i,q):
-    key=get_key(i)
-    queues.setdefault(key,[])
-    data=await safe_extract(f"ytsearch1:{q}")
+async def add_queue(i, q):
+    key = get_key(i)
+    queues.setdefault(key, [])
+    data = await safe_extract(f"ytsearch1:{q}")
     if not data: return
     queues[key].append(data['entries'][0])
 
 async def play_next(i):
-    key=get_key(i)
-    if not queues.get(key):
-        # 자동 추천
-        await add_queue(i,"kpop playlist")
-    
-    info=queues[key].pop(0)
-    current_track[key]=info
-    vc=i.guild.voice_client
+    key = get_key(i)
 
-    data = preloaded.get(key) or await safe_extract(info['webpage_url'])
+    if not queues.get(key):
+        await add_queue(i, "kpop playlist")
+
+    info = queues[key].pop(0)
+    current_track[key] = info
+
+    vc = i.guild.voice_client
+
+    stream = preloaded.get(key) or await get_stream_url(info['webpage_url'])
+    if not stream:
+        return await play_next(i)
 
     src = discord.PCMVolumeTransformer(
-        discord.FFmpegPCMAudio(data['url'], executable=FFMPEG_PATH),
+        discord.FFmpegPCMAudio(stream, executable=FFMPEG_PATH),
         volume=0
     )
 
-    vc.play(src,after=lambda e:asyncio.run_coroutine_threadsafe(play_next(i),client.loop))
-    await fade(vc,0,1)
+    vc.play(src, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(i), client.loop))
+    await fade(vc, 0, 1)
 
-    start_time[key]=time.time()
+    start_time[key] = time.time()
 
     await preload_next(i)
 
-    msg = await i.channel.send(embed=make_embed(info,i),view=ControlView())
-    player_message[key]=msg
+    msg = await i.channel.send(embed=make_embed(info, i), view=ControlView())
+    player_message[key] = msg
 
-    asyncio.create_task(update_ui(i,info))
+    asyncio.create_task(update_ui(i, info))
 
 # ================= UI =================
-def make_embed(info,i):
-    key=get_key(i)
+def make_embed(info, i):
+    key = get_key(i)
 
     queue_preview = ""
     if queues.get(key):
-        queue_preview="\n".join([f"➡ {q['title'][:25]}" for q in queues[key][:3]])
+        queue_preview = "\n".join([f"🎵 {q['title'][:30]}" for q in queues[key][:3]])
 
-    embed=discord.Embed(
-        title="🎧 Spotify Player",
+    embed = discord.Embed(
+        title="🎧 Spotify Ultra Player",
         description=f"""
-**{info['title']}**
+🎶 **{info['title']}**
 
 {bar(0)}
 
-🎶 {lyrics()}
+━━━━━━━━━━━━━━
 
-📀 다음곡:
-{queue_preview if queue_preview else '없음'}
+🎤 {lyrics()}
+
+━━━━━━━━━━━━━━
+
+📀 다음곡
+{queue_preview if queue_preview else "없음"}
 """,
         color=0x1DB954
     )
 
+    embed.set_image(url=info['thumbnail'])
     embed.set_thumbnail(url=info['thumbnail'])
-    embed.set_footer(text="🔥 Ultra Music System")
+    embed.set_footer(text="💚 Spotify Style Player")
 
     return embed
 
-async def update_ui(i,info):
-    key=get_key(i)
-    dur=info.get("duration",180)
+async def update_ui(i, info):
+    key = get_key(i)
+    dur = info.get("duration", 180)
 
     while key in start_time:
-        vc=i.guild.voice_client
-        state="play" if vc and vc.is_playing() else "pause"
+        vc = i.guild.voice_client
+        state = "play" if vc and vc.is_playing() else "pause"
 
-        el=int(time.time()-start_time[key])
-        p=min(el/dur,1)
+        el = int(time.time() - start_time[key])
+        p = min(el / dur, 1)
 
-        embed=make_embed(info,i)
-        embed.description=embed.description.replace(bar(0),bar(p)) + f"\n⏱ {format_time(el)}/{format_time(dur)}"
+        embed = make_embed(info, i)
+        embed.description = embed.description.replace(bar(0), bar(p)) + f"\n⏱ {format_time(el)}/{format_time(dur)}"
 
         try:
-            await player_message[key].edit(embed=embed,view=ControlView(state))
+            await player_message[key].edit(embed=embed, view=ControlView(state))
         except:
             pass
 
         await asyncio.sleep(1)
 
 # ================= 검색 =================
-class SearchModal(discord.ui.Modal,title="🎵 검색"):
-    query=discord.ui.TextInput(label="노래")
+class SearchModal(discord.ui.Modal, title="🎵 음악 검색"):
+    query = discord.ui.TextInput(label="노래 입력")
 
-    async def on_submit(self,i):
+    async def on_submit(self, i):
         await i.response.defer()
 
-        data=await safe_extract(f"ytsearch5:{self.query}")
-        if not data: return
+        data = await safe_extract(f"ytsearch5:{self.query}")
+        if not data:
+            return await i.followup.send("❌ 검색 실패")
 
-        results=data["entries"]
+        results = data["entries"]
 
-        embed=discord.Embed(title="🎬 검색 결과",
-        description="\n".join([f"{idx+1}. {r['title']}" for idx,r in enumerate(results)]))
+        embed = discord.Embed(
+            title="🎬 검색 결과",
+            description="\n".join([f"{idx+1}. {r['title']}" for idx, r in enumerate(results)]),
+            color=0xFF0000
+        )
+        embed.set_image(url=results[0]['thumbnail'])
 
-        view=discord.ui.View()
+        view = discord.ui.View()
 
-        for idx,r in enumerate(results):
-            btn=discord.ui.Button(label=str(idx+1))
+        for idx, r in enumerate(results):
+            btn = discord.ui.Button(label=str(idx+1))
 
-            async def cb(interaction,r=r):
-                await add_queue(interaction,r['title'])
+            async def cb(interaction, r=r):
+                await add_queue(interaction, r['title'])
                 if not interaction.guild.voice_client:
                     await interaction.user.voice.channel.connect()
                 if not interaction.guild.voice_client.is_playing():
                     await play_next(interaction)
                 await interaction.response.defer()
 
-            btn.callback=cb
+            btn.callback = cb
             view.add_item(btn)
 
-        await i.followup.send(embed=embed,view=view)
+        await i.followup.send(embed=embed, view=view)
 
 # ================= 패널 =================
 class PanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🔍 검색",style=discord.ButtonStyle.primary,custom_id="search")
-    async def search(self,i,b):
+    @discord.ui.button(label="🔍 음악 검색", style=discord.ButtonStyle.primary, custom_id="search")
+    async def search(self, i, b):
         await i.response.send_modal(SearchModal())
 
-    @discord.ui.button(label="🔥 인기곡",style=discord.ButtonStyle.success,custom_id="top")
-    async def top(self,i,b):
-        await add_queue(i,"kpop hits")
+    @discord.ui.button(label="🔥 인기곡", style=discord.ButtonStyle.success, custom_id="top")
+    async def top(self, i, b):
+        await add_queue(i, "kpop top hits")
         await i.response.send_message("🔥 추가 완료")
 
-    @discord.ui.button(label="📊 대기열",style=discord.ButtonStyle.secondary,custom_id="queue")
-    async def queue_btn(self,i,b):
-        key=get_key(i)
-        q=queues.get(key,[])
-        txt="\n".join([f"{idx+1}. {t['title']}" for idx,t in enumerate(q[:10])])
+    @discord.ui.button(label="📊 대기열", style=discord.ButtonStyle.secondary, custom_id="queue")
+    async def queue_btn(self, i, b):
+        key = get_key(i)
+        q = queues.get(key, [])
+        txt = "\n".join([f"{idx+1}. {t['title']}" for idx, t in enumerate(q[:10])])
         await i.response.send_message(f"📀 대기열\n{txt if txt else '없음'}")
 
 # ================= 실행 =================
-@tree.command(name="셋업",guild=discord.Object(id=GUILD_ID))
-async def setup(i:discord.Interaction):
-    embed=discord.Embed(
-        title="🎧 Spotify Ultra Player",
+@tree.command(name="셋업", guild=discord.Object(id=GUILD_ID))
+async def setup(i: discord.Interaction):
+    embed = discord.Embed(
+        title="🎧 Spotify Ultra Music System",
         description="""
 🔥 완전 자동 음악 시스템
 
 🎶 자동 추천
 📀 앨범 UI
-📊 대기열 관리
+📊 대기열
 🎚 실시간 조작
 
-버튼 눌러서 시작 ㄱㄱ
+버튼 눌러 시작 ㄱㄱ
 """,
         color=0x1DB954
     )
-    await i.response.send_message(embed=embed,view=PanelView())
+
+    embed.set_image(url="https://i.imgur.com/8Km9tLL.png")
+    embed.set_thumbnail(url="https://i.imgur.com/ZvWTUVu.png")
+
+    await i.response.send_message(embed=embed, view=PanelView())
 
 @client.event
 async def setup_hook():
@@ -318,6 +378,6 @@ async def setup_hook():
 async def on_ready():
     client.add_view(ControlView())
     client.add_view(PanelView())
-    print("🔥 Spotify급 봇 실행 완료")
+    print("🔥 완전체 실행됨")
 
 client.run(TOKEN)
