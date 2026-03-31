@@ -138,7 +138,7 @@ class Panel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🔍 검색", style=discord.ButtonStyle.success, custom_id="search")
+    @discord.ui.button(label="🔍 음악검색하기", style=discord.ButtonStyle.success, custom_id="search")
     async def search(self, i, b):
         await i.response.send_modal(Search())
 
