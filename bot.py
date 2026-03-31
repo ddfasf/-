@@ -38,101 +38,44 @@ def get_settings(gid):
         "panel_msg": None
     })
 
-GIFS = [
-    "https://media.giphy.com/media/ZVik7pBtu9dNS/giphy.gif",
-    "https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif",
-    "https://media.giphy.com/media/l3vRlT2k2L35Cnn5C/giphy.gif"
-]
-
-# 🔥 핵심: 차단 우회 설정
+# ================= yt-dlp (🔥 안정화 버전) =================
 ydl_opts = {
     "format": "bestaudio[ext=m4a]/bestaudio/best",
     "quiet": True,
-    "cookiefile": "cookies.txt",
     "noplaylist": True,
-    "nocheckcertificate": True,
-    "ignoreerrors": True,
-    "http_headers": {
-        "User-Agent": "Mozilla/5.0"
-    },
+    "default_search": "ytsearch",
     "extractor_args": {
         "youtube": {
-            "player_client": ["web"]
+            "player_client": ["android", "web"]
         }
-    }
+    },
+    "retries": 5,
 }
 
-# 🔥 핵심: extract 강화
 async def extract(q):
     loop = asyncio.get_event_loop()
 
     def run():
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(q, download=False)
-
-            if not info:
-                return None
-
-            # 검색 결과
-            if "entries" in info:
-                return info
-
-            # URL 보정
-            if "url" not in info:
-                formats = info.get("formats", [])
-                for f in formats:
-                    if f.get("url"):
-                        info["url"] = f["url"]
-                        break
-
-            return info
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(q, download=False)
+        except Exception as e:
+            print("❌ yt-dlp 에러:", e)
+            return None
 
     return await loop.run_in_executor(None, run)
-
-# ================= UI =================
-def make_embed(song, elapsed):
-    d = song.get("duration", 180)
-
-    bar_len = 18
-    filled = int(bar_len * elapsed / max(d, 1))
-    bar = "▰"*filled + "▱"*(bar_len-filled)
-
-    emb = discord.Embed(
-        title="🎧 NOW PLAYING",
-        description=f"🎵 [{song['title']}]({song['webpage_url']})",
-        color=0x1DB954
-    )
-
-    emb.add_field(name="⏱ 진행", value=f"{bar}\n{elapsed}/{d}s", inline=False)
-    emb.set_thumbnail(url=song.get("thumbnail"))
-    emb.set_image(url=random.choice(GIFS))
-    emb.set_footer(text="🎶 Music Bot")
-
-    return emb
-
-async def update(msg, gid):
-    while gid in now_playing:
-        s = now_playing[gid]
-        elapsed = int(time.time() - start_times[gid])
-
-        try:
-            await msg.edit(embed=make_embed(s, elapsed))
-        except:
-            break
-
-        await asyncio.sleep(2)
 
 # ================= 패널 =================
 class Panel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🎵 검색", style=discord.ButtonStyle.success, custom_id="search_btn")
-    async def search(self, i, b):
+    @discord.ui.button(label="🔍 검색", style=discord.ButtonStyle.success, custom_id="search_btn")
+    async def search(self, i: discord.Interaction, b):
         await i.response.send_modal(Search())
 
     @discord.ui.button(label="📀 큐", style=discord.ButtonStyle.primary, custom_id="queue_btn")
-    async def queue(self, i, b):
+    async def queue(self, i: discord.Interaction, b):
         q = queues.get(i.guild.id, [])
         if not q:
             return await i.response.send_message("없음", ephemeral=True)
@@ -144,14 +87,18 @@ class Panel(discord.ui.View):
 class Search(discord.ui.Modal, title="검색"):
     query = discord.ui.TextInput(label="검색어")
 
-    async def on_submit(self, i):
-        await i.response.defer()
+    async def on_submit(self, i: discord.Interaction):
+        await i.response.defer(ephemeral=True)
 
         data = await extract(f"ytsearch5:{self.query}")
-        if not data or not data.get("entries"):
+
+        if not data or "entries" not in data:
             return await i.followup.send("❌ 검색 실패", ephemeral=True)
 
-        res = data["entries"]
+        res = [r for r in data["entries"] if r]
+
+        if not res:
+            return await i.followup.send("❌ 결과 없음", ephemeral=True)
 
         v = discord.ui.View(timeout=60)
 
@@ -159,8 +106,8 @@ class Search(discord.ui.Modal, title="검색"):
             title = r.get("title", "제목없음")[:20]
             b = discord.ui.Button(label=title)
 
-            async def cb(inter, r=r):
-                await inter.response.defer()
+            async def cb(inter: discord.Interaction, r=r):
+                await inter.response.defer(ephemeral=True)
 
                 if not inter.user.voice:
                     return await inter.followup.send("❌ 음성채널 들어가", ephemeral=True)
@@ -183,7 +130,7 @@ class Search(discord.ui.Modal, title="검색"):
         await i.followup.send("🎬 검색 결과", view=v, ephemeral=True)
 
 # ================= 재생 =================
-async def play_next(i):
+async def play_next(i: discord.Interaction):
     k = i.guild.id
     vc = i.guild.voice_client
 
@@ -193,20 +140,22 @@ async def play_next(i):
     song = queues[k].pop(0)
 
     data = await extract(song["webpage_url"])
-    if not data or "url" not in data:
-        return await i.channel.send("❌ 재생 실패 (차단됨)")
+    if not data:
+        return await play_next(i)
 
-    stream_url = data["url"]
+    stream_url = data.get("url")
+    if not stream_url:
+        return await play_next(i)
 
     now_playing[k] = song
     start_times[k] = time.time()
 
-    # 🔥 핵심: FFmpeg 안정화
-    source = discord.FFmpegPCMAudio(
-        stream_url,
-        before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-        options="-vn"
-    )
+    ffmpeg_options = {
+        "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+        "options": "-vn"
+    }
+
+    source = discord.FFmpegPCMAudio(stream_url, **ffmpeg_options)
 
     def after(e):
         fut = asyncio.run_coroutine_threadsafe(play_next(i), client.loop)
@@ -217,8 +166,14 @@ async def play_next(i):
 
     vc.play(source, after=after)
 
-    msg = await i.channel.send(embed=make_embed(song, 0))
-    client.loop.create_task(update(msg, k))
+    emb = discord.Embed(
+        title="🎧 NOW PLAYING",
+        description=f"[{song.get('title','')}]({song.get('webpage_url','')})",
+        color=0x1DB954
+    )
+
+    emb.set_thumbnail(url=song.get("thumbnail"))
+    await i.channel.send(embed=emb)
 
 # ================= 패널 생성 =================
 async def send_panel(ch, gid):
@@ -233,10 +188,9 @@ async def send_panel(ch, gid):
 
     emb = discord.Embed(
         title="🎧 MUSIC PANEL",
-        description="🎵 버튼으로 음악 재생",
+        description="버튼으로 음악 재생",
         color=0x1DB954
     )
-    emb.set_image(url=random.choice(GIFS))
 
     msg = await ch.send(embed=emb, view=Panel())
 
@@ -267,8 +221,8 @@ async def on_ready():
     client.add_view(Panel())
 
     try:
-        synced = await tree.sync()
-        print(f"✅ 명령어 {len(synced)}개 등록됨")
+        await tree.sync()
+        print("✅ 명령어 등록 완료")
     except Exception as e:
         print("❌", e)
 
