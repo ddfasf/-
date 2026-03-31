@@ -3,6 +3,7 @@ from discord import app_commands
 import yt_dlp
 import asyncio
 import time
+import os
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -17,12 +18,13 @@ start_times = {}
 def key(interaction):
     return interaction.guild.id
 
-# 🔥 yt-dlp 안정화
+# 🔥 yt-dlp 안정화 (쿠키 넣으면 더 좋음)
 ydl_opts = {
     "format": "bestaudio/best",
     "quiet": True,
     "http_headers": {"User-Agent": "Mozilla/5.0"},
-    "extractor_args": {"youtube": {"player_client": ["android", "web"]}}
+    "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+    # "cookiefile": "cookies.txt"  # 🔥 필요하면 활성화
 }
 
 async def extract(query):
@@ -32,11 +34,11 @@ async def extract(query):
             return ydl.extract_info(query, download=False)
     return await loop.run_in_executor(None, run)
 
-# 🎨 네온 진행바
+# 🎨 진행바
 def fancy_bar(current, total, length=18):
+    total = max(total, 1)
     filled = int(length * current / total)
-    bar = "▰" * filled + "▱" * (length - filled)
-    return f"🎧 {bar}"
+    return "▰" * filled + "▱" * (length - filled)
 
 # 🎬 플레이어 UI
 async def send_player(interaction):
@@ -49,20 +51,17 @@ async def send_player(interaction):
         color=0x5865F2
     )
 
-    # 썸네일
     if song.get("thumbnail"):
         embed.set_thumbnail(url=song["thumbnail"])
 
-    # 고퀄 GIF
     embed.set_image(url="https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif")
 
     embed.add_field(name="💿 상태", value="▶️ 재생중", inline=True)
-    embed.add_field(name="🔊 볼륨", value="100%", inline=True)
-    embed.add_field(name="🎶 요청자", value=interaction.user.mention, inline=False)
+    embed.add_field(name="🎶 요청자", value=interaction.user.mention, inline=True)
 
     view = PlayerView()
-
     msg = await interaction.channel.send(embed=embed, view=view)
+
     client.loop.create_task(update_progress(msg, interaction))
 
 # ⏱ 진행바 업데이트
@@ -105,10 +104,10 @@ class PlayerView(discord.ui.View):
     async def pause(self, interaction, button):
         vc = interaction.guild.voice_client
 
-        if vc.is_playing():
+        if vc and vc.is_playing():
             vc.pause()
             button.label = "▶️"
-        else:
+        elif vc:
             vc.resume()
             button.label = "⏸"
 
@@ -122,11 +121,9 @@ class PlayerView(discord.ui.View):
     @discord.ui.button(label="⏭", style=discord.ButtonStyle.primary)
     async def skip(self, interaction, button):
         await interaction.response.defer()
-        interaction.guild.voice_client.stop()
-
-    @discord.ui.button(label="❤️", style=discord.ButtonStyle.danger)
-    async def like(self, interaction, button):
-        await interaction.response.send_message("❤️ 좋아요 추가!", ephemeral=True)
+        vc = interaction.guild.voice_client
+        if vc:
+            vc.stop()
 
 # 🎵 재생
 async def play_next(interaction):
@@ -140,12 +137,17 @@ async def play_next(interaction):
     now_playing[k] = song
     start_times[k] = time.time()
 
-    source = discord.FFmpegPCMAudio(song["url"])
+    source = discord.FFmpegPCMAudio(
+        song["url"],
+        executable="ffmpeg"
+    )
 
     def after(e):
         fut = asyncio.run_coroutine_threadsafe(play_next(interaction), client.loop)
-        try: fut.result()
-        except: pass
+        try:
+            fut.result()
+        except:
+            pass
 
     vc.play(source, after=after)
     await send_player(interaction)
@@ -157,8 +159,11 @@ class SearchModal(discord.ui.Modal, title="🎵 검색"):
     async def on_submit(self, i: discord.Interaction):
         await i.response.defer()
 
-        data = await extract(f"ytsearch5:{self.query}")
-        results = data["entries"]
+        try:
+            data = await extract(f"ytsearch5:{self.query}")
+            results = data["entries"]
+        except Exception as e:
+            return await i.followup.send(f"❌ 검색 실패: {e}")
 
         embed = discord.Embed(
             title="🎬 검색 결과",
@@ -175,7 +180,7 @@ class SearchModal(discord.ui.Modal, title="🎵 검색"):
                 await interaction.response.defer()
 
                 if not interaction.user.voice:
-                    return await interaction.followup.send("❌ 음성채널 들어가", ephemeral=True)
+                    return await interaction.followup.send("❌ 음성채널 먼저 들어가", ephemeral=True)
 
                 k = key(interaction)
                 queues.setdefault(k, []).append(r)
@@ -187,12 +192,12 @@ class SearchModal(discord.ui.Modal, title="🎵 검색"):
                 if not vc.is_playing():
                     await play_next(interaction)
 
-                # 📀 고급 카드
                 embed2 = discord.Embed(
                     title="📀 QUEUE ADD",
                     description=f"🎵 **{r['title']}**\n✨ 대기열 추가 완료",
                     color=0x00FFAA
                 )
+
                 if r.get("thumbnail"):
                     embed2.set_thumbnail(url=r["thumbnail"])
 
@@ -214,11 +219,12 @@ class Panel(discord.ui.View):
 
 @client.event
 async def on_ready():
-    print("🔥 UI 끝판왕 실행됨")
+    print("🔥 완전체 실행됨")
     await tree.sync()
 
 @tree.command(name="패널")
 async def panel(interaction: discord.Interaction):
     await interaction.response.send_message("🎧 음악 패널", view=Panel())
 
-client.run("YOUR_TOKEN")
+# 🔥 토큰 (환경변수)
+client.run(os.environ.get("TOKEN"))
