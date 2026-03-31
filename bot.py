@@ -21,9 +21,17 @@ start_time = {}
 current_track = {}
 loading = {}
 
+# 🎬 GIF 리스트 (앨범 느낌)
+GIFS = [
+    "https://media.giphy.com/media/13HgwGsXF0aiGY/giphy.gif",
+    "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif",
+    "https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif",
+    "https://media.giphy.com/media/xT9IgzoKnwFNmISR8I/giphy.gif"
+]
+
 # ================= yt-dlp =================
 YDL_OPTS = {
-    'format': 'bestaudio[ext=m4a]/bestaudio/best',
+    'format': 'bestaudio/best',
     'quiet': True,
     'noplaylist': True,
     'default_search': 'ytsearch',
@@ -44,13 +52,12 @@ def bar(p):
     return "▰"*int(p*12)+"▱"*(12-int(p*12))
 
 def lyrics_anim():
-    lines = [
+    return random.choice([
         "🌙 이 밤을 따라 흘러가...",
         "💫 너와 나의 멜로디...",
         "🔥 심장이 뛰는 순간...",
         "✨ 끝나지 않을 노래..."
-    ]
-    return random.choice(lines)
+    ])
 
 # ================= SEEK =================
 async def seek(i, percent):
@@ -77,44 +84,48 @@ async def seek(i, percent):
 
 # ================= UI =================
 class PlayerUI(discord.ui.View):
-    def __init__(self, state="play"):
+    def __init__(self):
         super().__init__(timeout=None)
 
-        emoji = "⏳" if state=="loading" else ("⏸️" if state=="play" else "▶️")
-
-        btn = discord.ui.Button(emoji=emoji, style=discord.ButtonStyle.success)
-        btn.callback = self.toggle
-        self.add_item(btn)
-
-        for e, cb in [("⏮️", self.back), ("⏭️", self.skip)]:
-            b = discord.ui.Button(emoji=e)
-            b.callback = cb
-            self.add_item(b)
-
-        select = discord.ui.Select(
-            placeholder="🎚 이동",
-            options=[discord.SelectOption(label=f"{i*10}%", value=str(i/10)) for i in range(11)]
-        )
-        select.callback = self.seek_cb
-        self.add_item(select)
-
-    async def toggle(self, i):
+    @discord.ui.button(emoji="⏯", style=discord.ButtonStyle.success, custom_id="toggle")
+    async def toggle(self, i: discord.Interaction, b: discord.ui.Button):
         vc = i.guild.voice_client
-        if vc.is_playing():
+        if vc and vc.is_playing():
             vc.pause()
-        else:
+        elif vc:
             vc.resume()
         await i.response.defer()
 
-    async def skip(self, i):
-        i.guild.voice_client.stop()
+    @discord.ui.button(emoji="⏮️", custom_id="back")
+    async def back(self, i: discord.Interaction, b):
+        await seek(i, 0.1)
         await i.response.defer()
 
-    async def back(self, i):
-        await seek(i, 0.1)
+    @discord.ui.button(emoji="⏭️", custom_id="skip")
+    async def skip(self, i: discord.Interaction, b):
+        vc = i.guild.voice_client
+        if vc:
+            vc.stop()
+        await i.response.defer()
 
-    async def seek_cb(self, i):
-        await seek(i, float(self.children[-1].values[0]))
+    @discord.ui.button(label="-10%", custom_id="rewind")
+    async def rewind(self, i: discord.Interaction, b):
+        await seek(i, 0.1)
+        await i.response.defer()
+
+    @discord.ui.button(label="+10%", custom_id="forward")
+    async def forward(self, i: discord.Interaction, b):
+        await seek(i, 0.9)
+        await i.response.defer()
+
+    @discord.ui.select(
+        placeholder="🎚 정밀 이동",
+        custom_id="seek_select",
+        options=[discord.SelectOption(label=f"{i*10}%", value=str(i/10)) for i in range(11)]
+    )
+    async def select_seek(self, i: discord.Interaction, select: discord.ui.Select):
+        percent = float(select.values[0])
+        await seek(i, percent)
         await i.response.defer()
 
 # ================= 재생 =================
@@ -140,7 +151,7 @@ async def play_next(i):
 
     msg = await i.channel.send(
         embed=discord.Embed(title="🎧 재생 시작", description=info['title'], color=0x1DB954),
-        view=PlayerUI("play")
+        view=PlayerUI()
     )
 
     player_message[k] = msg
@@ -170,12 +181,11 @@ async def update_ui(i, info):
             color=0x1DB954
         )
 
-        embed.set_image(url=info['thumbnail'])
-
-        state = "loading" if loading.get(k) else "play"
+        # 🎬 GIF 적용
+        embed.set_image(url=random.choice(GIFS))
 
         try:
-            await player_message[k].edit(embed=embed, view=PlayerUI(state))
+            await player_message[k].edit(embed=embed, view=PlayerUI())
         except:
             pass
 
@@ -185,7 +195,7 @@ async def update_ui(i, info):
 class SearchModal(discord.ui.Modal, title="🎵 검색"):
     query = discord.ui.TextInput(label="노래")
 
-    async def on_submit(self, i):
+    async def on_submit(self, i: discord.Interaction):
         await i.response.defer()
 
         data = await extract(f"ytsearch5:{self.query}")
@@ -196,12 +206,11 @@ class SearchModal(discord.ui.Modal, title="🎵 검색"):
             description="\n".join([f"{idx+1}. {r['title']}" for idx, r in enumerate(results)]),
             color=0xFF0000
         )
-        embed.set_image(url=results[0]['thumbnail'])
 
         view = discord.ui.View()
 
-        for r in results:
-            btn = discord.ui.Button(label="▶ 재생")
+        for idx, r in enumerate(results):
+            btn = discord.ui.Button(label=f"{idx+1}번 재생")
 
             async def cb(interaction, r=r):
                 k = key(interaction)
@@ -225,31 +234,23 @@ class Panel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="🎵 검색", style=discord.ButtonStyle.success)
-    async def search(self, i, b):
+    @discord.ui.button(label="🎵 검색", style=discord.ButtonStyle.success, custom_id="panel_search")
+    async def search(self, i: discord.Interaction, b):
         await i.response.send_modal(SearchModal())
 
 # ================= 셋업 =================
 @tree.command(name="셋업", guild=discord.Object(id=GUILD_ID))
 async def setup(i: discord.Interaction):
-
-    # 채널 생성
     channel = await i.guild.create_text_channel("🎧-music-player")
 
     embed = discord.Embed(
         title="🎧 Spotify UI Player",
-        description=(
-            "🎵 검색해서 노래 재생\n"
-            "🎚 슬라이더 이동 가능\n"
-            "📀 자동 다음곡 표시\n"
-            "🎶 실시간 가사 애니메이션"
-        ),
+        description="🎬 GIF + 🎚 슬라이더 + 🎶 가사 + 📀 큐 시스템",
         color=0x1DB954
     )
 
     await channel.send(embed=embed, view=Panel())
-
-    await i.response.send_message(f"✅ 채널 생성 완료 → {channel.mention}", ephemeral=True)
+    await i.response.send_message("✅ 완료", ephemeral=True)
 
 # ================= 실행 =================
 @client.event
@@ -260,6 +261,6 @@ async def setup_hook():
 async def on_ready():
     client.add_view(PlayerUI())
     client.add_view(Panel())
-    print("🔥 완전체 Spotify 봇 실행됨")
+    print("🔥 완전체 실행됨")
 
 client.run(TOKEN)
