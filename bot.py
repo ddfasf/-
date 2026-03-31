@@ -186,10 +186,8 @@ async def on_ready():
     client.add_view(Panel())
 
     try:
-        guild = discord.Object(id=GUILD_ID)
-        tree.clear_commands(guild=guild)
-        await tree.sync(guild=guild)
-        print("✅ setup 명령어 등록 완료")
+        await tree.sync()  # 🔥 글로벌 sync
+        print("✅ 글로벌 명령어 등록 완료")
     except Exception as e:
         print("❌", e)
 
