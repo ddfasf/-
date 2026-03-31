@@ -7,7 +7,7 @@ import json
 import requests
 import os
 
-TOKEN = os.environ.get("TT")
+TOKEN = os.environ.get("TOKEN")
 GUILD_ID = 1484915814187401259
 FFMPEG_PATH = "ffmpeg"
 GENIUS_TOKEN = "여기에_Genius_API"
