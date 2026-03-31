@@ -110,13 +110,16 @@ def get_lyrics(title):
     except:
         return "가사 없음"
 
-def fake_sync():
-    return [
-        (0, "🎶 시작"),
-        (10, "💫 분위기"),
-        (20, "🔥 클라이맥스"),
-        (30, "✨ 후렴"),
+def get_lyrics(title):
+    samples = [
+        "🌙 이 밤을 따라 흘러가",
+        "💫 너와 나의 멜로디",
+        "🔥 심장이 뛰는 순간",
+        "✨ 끝나지 않을 노래",
+        "🎶 기억 속의 그 장면",
+        "🌊 감정이 파도처럼 밀려와"
     ]
+    return "\n".join(random.sample(samples, 3))
 
 # ================= 기본 =================
 def get_key(i):
@@ -133,15 +136,16 @@ class VolumeSelect(discord.ui.Select):
     def __init__(self):
         super().__init__(
             placeholder="🎚 Volume",
+            custom_id="volume_select",
             options=[discord.SelectOption(label=f"{i*10}%", value=str(i/10)) for i in range(1,11)]
         )
 
-    async def callback(self, i):
+    async def callback(self, i: discord.Interaction):
         key = get_key(i)
         vol = float(self.values[0])
         volume_level[key] = vol
 
-        if i.guild.voice_client:
+        if i.guild.voice_client and i.guild.voice_client.source:
             i.guild.voice_client.source.volume = vol
 
         await i.response.send_message(f"🔊 {int(vol*100)}%", ephemeral=True)
@@ -152,37 +156,45 @@ class ControlView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(VolumeSelect())
 
-    @discord.ui.button(label="⏯")
-    async def pause(self,i,b):
-        vc=i.guild.voice_client
-        vc.pause() if vc.is_playing() else vc.resume()
+    @discord.ui.button(label="⏯", style=discord.ButtonStyle.gray, custom_id="pause_btn")
+    async def pause(self, i: discord.Interaction, b: discord.ui.Button):
+        vc = i.guild.voice_client
+        if not vc:
+            return await i.response.send_message("❌ 없음", ephemeral=True)
+
+        if vc.is_playing():
+            vc.pause()
+        else:
+            vc.resume()
+
         await i.response.defer()
 
-    @discord.ui.button(label="⏭")
-    async def skip(self,i,b):
-        i.guild.voice_client.stop()
+    @discord.ui.button(label="⏭", style=discord.ButtonStyle.gray, custom_id="skip_btn")
+    async def skip(self, i: discord.Interaction, b: discord.ui.Button):
+        if i.guild.voice_client:
+            i.guild.voice_client.stop()
         await i.response.defer()
 
-    @discord.ui.button(label="🔁")
-    async def dj(self,i,b):
-        key=get_key(i)
-        dj_mode[key]=not dj_mode.get(key,False)
-        await i.response.send_message(f"DJ {'ON' if dj_mode[key] else 'OFF'}",ephemeral=True)
+    @discord.ui.button(label="🔁", style=discord.ButtonStyle.gray, custom_id="dj_btn")
+    async def dj(self, i: discord.Interaction, b: discord.ui.Button):
+        key = get_key(i)
+        dj_mode[key] = not dj_mode.get(key, False)
+        await i.response.send_message(f"DJ {'ON' if dj_mode[key] else 'OFF'}", ephemeral=True)
 
-    @discord.ui.button(label="🧠 추천")
-    async def mood(self,i,b):
-        await i.response.send_message("기분 입력해줘",ephemeral=True)
-        msg=await client.wait_for("message",check=lambda m:m.author==i.user)
-        mood=analyze_mood(msg.content)
-        await add_and_play(i,mood_to_query(mood))
+    @discord.ui.button(label="🧠 추천", style=discord.ButtonStyle.gray, custom_id="mood_btn")
+    async def mood(self, i: discord.Interaction, b: discord.ui.Button):
+        await i.response.send_message("기분 입력해줘", ephemeral=True)
+        msg = await client.wait_for("message", check=lambda m: m.author == i.user)
+        mood = analyze_mood(msg.content)
+        await add_and_play(i, mood_to_query(mood))
 
-    @discord.ui.button(label="📀 Playlist")
-    async def playlist(self,i,b):
-        await i.response.send_message("링크 보내",ephemeral=True)
-        msg=await client.wait_for("message",check=lambda m:m.author==i.user)
-        tracks=get_playlist_tracks(msg.content)
+    @discord.ui.button(label="📀 Playlist", style=discord.ButtonStyle.gray, custom_id="playlist_btn")
+    async def playlist(self, i: discord.Interaction, b: discord.ui.Button):
+        await i.response.send_message("링크 보내", ephemeral=True)
+        msg = await client.wait_for("message", check=lambda m: m.author == i.user)
+        tracks = get_playlist_tracks(msg.content)
         for t in tracks:
-            await add_to_queue(i,t)
+            await add_to_queue(i, t)
         await i.channel.send("추가 완료")
 
 # ================= 음악 =================
