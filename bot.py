@@ -218,13 +218,22 @@ class Panel(discord.ui.View):
         await interaction.response.send_modal(SearchModal())
 
 @client.event
+GUILD_ID = 1484915814187401259  # 너 서버 ID
+
+@client.event
 async def on_ready():
     print("🔥 완전체 실행됨")
-    await tree.sync()
+    await tree.sync(guild=discord.Object(id=GUILD_ID))
 
-@tree.command(name="패널")
+
+@tree.command(name="panel")
 async def panel(interaction: discord.Interaction):
     await interaction.response.send_message("🎧 음악 패널", view=Panel())
+
+
+@tree.error
+async def on_app_command_error(interaction, error):
+    print("🔥 에러:", error)
 
 # 🔥 토큰 (환경변수)
 client.run(os.environ.get("TOKEN"))
