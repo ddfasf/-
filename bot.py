@@ -21,6 +21,7 @@ volume_level = {}
 start_time = {}
 current_track = {}
 loading_state = {}
+next_source = {}  # 🔥 핵심
 
 # ================= yt-dlp =================
 YDL_OPTS = {
@@ -30,7 +31,8 @@ YDL_OPTS = {
     'ignoreerrors': True,
     'default_search': 'ytsearch',
     'source_address': '0.0.0.0',
-    'cookiefile': 'cookies.txt',  # 없으면 지워도 됨
+    'cookiefile': 'cookies.txt',
+    'http_headers': {'User-Agent': 'Mozilla/5.0'}
 }
 
 async def safe_extract(query):
@@ -73,6 +75,26 @@ async def fade_in(vc):
     for i in range(11):
         vc.source.volume=i/10
         await asyncio.sleep(0.1)
+
+# ================= 프리로드 =================
+async def preload_next(i):
+    key = get_key(i)
+
+    if not queues.get(key):
+        return
+
+    next_info = queues[key][0]
+
+    data = await safe_extract(next_info['webpage_url'])
+    if not data:
+        return
+
+    source = discord.PCMVolumeTransformer(
+        discord.FFmpegPCMAudio(data['url'], executable=FFMPEG_PATH),
+        volume=volume_level.get(key, 0.5)
+    )
+
+    next_source[key] = (source, next_info)
 
 # ================= SEEK =================
 async def seek_to(i, percent):
@@ -161,30 +183,47 @@ class ControlView(discord.ui.View):
 async def add_to_queue(i,q):
     key=get_key(i)
     queues.setdefault(key,[])
+
     data=await safe_extract(f"ytsearch1:{q}")
     if not data or not data.get("entries"):
         return await i.channel.send("❌ 검색 실패")
+
     queues[key].append(data["entries"][0])
+
+    if len(queues[key]) == 1:
+        asyncio.create_task(preload_next(i))
 
 async def play_next(i):
     key=get_key(i)
-    if not queues.get(key): return
-
-    info=queues[key].pop(0)
-    current_track[key]=info
     vc=i.guild.voice_client
 
-    data=await safe_extract(info['webpage_url'])
-    if not data: return await play_next(i)
+    if not queues.get(key) and key not in next_source:
+        return
 
-    source=discord.PCMVolumeTransformer(
-        discord.FFmpegPCMAudio(data['url'],executable=FFMPEG_PATH),
-        volume=0.0)
+    # 🔥 프리로드 사용
+    if key in next_source:
+        source, info = next_source.pop(key)
+    else:
+        info=queues[key].pop(0)
+        data=await safe_extract(info['webpage_url'])
+        if not data:
+            return await play_next(i)
 
-    vc.play(source,after=lambda e:asyncio.run_coroutine_threadsafe(play_next(i),client.loop))
+        source=discord.PCMVolumeTransformer(
+            discord.FFmpegPCMAudio(data['url'],executable=FFMPEG_PATH),
+            volume=0.0)
+
+    current_track[key]=info
+
+    vc.play(
+        source,
+        after=lambda e:asyncio.run_coroutine_threadsafe(play_next(i),client.loop)
+    )
+
     await fade_in(vc)
-
     start_time[key]=time.time()
+
+    asyncio.create_task(preload_next(i))  # 🔥 다음곡 미리 로딩
 
     msg=await i.channel.send(
         embed=discord.Embed(title="🎧 Now Playing",description=info['title'],color=0x1DB954),
@@ -194,13 +233,14 @@ async def play_next(i):
 
     asyncio.create_task(update_ui(i,info))
 
+# ================= UI 업데이트 =================
 async def update_ui(i,info):
     key=get_key(i)
     dur=info.get("duration",180)
 
     while key in start_time:
         vc=i.guild.voice_client
-        state="loading" if loading_state.get(key) else ("play" if vc and vc.is_playing() else "pause")
+        state="play" if vc and vc.is_playing() else "pause"
 
         el=int(time.time()-start_time[key])
         p=min(el/dur,1)
@@ -291,6 +331,6 @@ async def setup_hook():
 async def on_ready():
     client.add_view(ControlView())
     client.add_view(PanelView())
-    print("🔥 완전체 실행됨")
+    print("🔥 완전체 실행됨 (프리로드 ON)")
 
 client.run(TOKEN)
