@@ -142,10 +142,9 @@ async def play_next(i):
 async def send_panel(ch, gid):
     s = get_settings(gid)
 
-    # 이미 패널 있으면 복구
     if s.get("panel_msg"):
         try:
-            msg = await ch.fetch_message(s["panel_msg"])
+            await ch.fetch_message(s["panel_msg"])
             return
         except:
             pass
@@ -161,7 +160,9 @@ async def send_panel(ch, gid):
     save_settings(settings)
 
 # ================= setup =================
-@tree.command(name="setup")
+GUILD_ID = 1484915814187401259
+
+@tree.command(name="setup", guild=discord.Object(id=GUILD_ID))
 async def setup(i: discord.Interaction):
     g = i.guild
 
@@ -177,26 +178,21 @@ async def setup(i: discord.Interaction):
     await i.response.send_message("✅ 완료", ephemeral=True)
 
 # ================= 실행 =================
-GUILD_ID = 1484915814187401259
-
 @client.event
 async def on_ready():
     print("🔥 실행됨")
+    print("서버들:", [g.id for g in client.guilds])
 
-    # 🔥 Persistent View 복구
     client.add_view(Panel())
 
     try:
         guild = discord.Object(id=GUILD_ID)
-
         tree.clear_commands(guild=guild)
         await tree.sync(guild=guild)
-
-        print("✅ 명령어 초기화 완료")
+        print("✅ setup 명령어 등록 완료")
     except Exception as e:
         print("❌", e)
 
-    # 🔥 패널 자동 복구
     for gid, data in settings.items():
         ch_id = data.get("music_channel")
         if ch_id:
