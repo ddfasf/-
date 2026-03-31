@@ -5,3 +5,4 @@ ffmpeg-python
 requests
 discord.py[voice]
 PyNaCl
+yt-dlp
