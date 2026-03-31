@@ -127,11 +127,21 @@ class Panel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="검색", emoji="🎵", style=discord.ButtonStyle.success)
+    @discord.ui.button(
+        label="검색",
+        emoji="🎵",
+        style=discord.ButtonStyle.success,
+        custom_id="music_search"
+    )
     async def search(self, i, b):
         await i.response.send_modal(Search())
 
-    @discord.ui.button(label="재생/정지", emoji="⏯", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(
+        label="재생/정지",
+        emoji="⏯",
+        style=discord.ButtonStyle.secondary,
+        custom_id="music_pause"
+    )
     async def pause(self, i, b):
         vc = i.guild.voice_client
         gid = i.guild.id
@@ -154,14 +164,24 @@ class Panel(discord.ui.View):
             await msg.edit(embed=make_embed(now_playing[gid], 0, gid, "▶"))
             await i.response.send_message("▶️ 재생", ephemeral=True)
 
-    @discord.ui.button(label="스킵", emoji="⏭", style=discord.ButtonStyle.primary)
+    @discord.ui.button(
+        label="스킵",
+        emoji="⏭",
+        style=discord.ButtonStyle.primary,
+        custom_id="music_skip"
+    )
     async def skip(self, i, b):
         vc = i.guild.voice_client
         if vc:
             vc.stop()
         await i.response.send_message("⏭ 스킵", ephemeral=True)
 
-    @discord.ui.button(label="큐", emoji="📀", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(
+        label="큐",
+        emoji="📀",
+        style=discord.ButtonStyle.secondary,
+        custom_id="music_queue"
+    )
     async def queue(self, i, b):
         q = queues.get(i.guild.id, [])
         if not q:
@@ -173,12 +193,22 @@ class Panel(discord.ui.View):
 
         await i.response.send_message(embed=emb, ephemeral=True)
 
-    @discord.ui.button(label="셔플", emoji="🔀", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(
+        label="셔플",
+        emoji="🔀",
+        style=discord.ButtonStyle.secondary,
+        custom_id="music_shuffle"
+    )
     async def shuffle(self, i, b):
         random.shuffle(queues.get(i.guild.id, []))
         await i.response.send_message("🔀 셔플 완료", ephemeral=True)
 
-    @discord.ui.button(label="반복", emoji="🔁", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(
+        label="반복",
+        emoji="🔁",
+        style=discord.ButtonStyle.secondary,
+        custom_id="music_loop"
+    )
     async def loop(self, i, b):
         gid = i.guild.id
         loop_state[gid] = not loop_state.get(gid, False)
