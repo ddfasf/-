@@ -38,17 +38,25 @@ def get_settings(gid):
         "panel_msg": None
     })
 
-# 🎬 GIF 리스트
+# 🎬 GIF
 GIFS = [
     "https://media.giphy.com/media/ZVik7pBtu9dNS/giphy.gif",
     "https://media.giphy.com/media/3o7aD2saalBwwftBIY/giphy.gif",
     "https://media.giphy.com/media/l3vRlT2k2L35Cnn5C/giphy.gif"
 ]
 
-# ================= yt-dlp =================
+# yt-dlp 안정화
 ydl_opts = {
     "format": "bestaudio/best",
     "quiet": True,
+    "noplaylist": True,
+    "nocheckcertificate": True,
+    "ignoreerrors": True,
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["android", "web"]
+        }
+    }
 }
 
 async def extract(q):
@@ -58,10 +66,9 @@ async def extract(q):
             return ydl.extract_info(q, download=False)
     return await loop.run_in_executor(None, run)
 
-# ================= Spotify 스타일 UI =================
+# 🎧 UI
 def make_embed(song, elapsed):
     d = song.get("duration", 180)
-
     bar_len = 18
     filled = int(bar_len * elapsed / max(d, 1))
     bar = "▰"*filled + "▱"*(bar_len-filled)
@@ -69,20 +76,13 @@ def make_embed(song, elapsed):
     emb = discord.Embed(
         title="🎧 NOW PLAYING",
         description=f"🎵 [{song['title']}]({song['webpage_url']})",
-        color=0x1DB954  # Spotify 색
+        color=0x1DB954
     )
 
     emb.add_field(name="⏱ 진행", value=f"{bar}\n{elapsed}/{d}s", inline=False)
-
-    # 썸네일 (작은 앨범)
     emb.set_thumbnail(url=song.get("thumbnail"))
-
-    # 큰 앨범 이미지 (Spotify 느낌)
-    emb.set_image(url=song.get("thumbnail"))
-
-    # 애니메이션 GIF
-    emb.set_footer(text="🎶 Spotify Style UI")
     emb.set_image(url=random.choice(GIFS))
+    emb.set_footer(text="🎶 Spotify UI")
 
     return emb
 
@@ -98,7 +98,7 @@ async def update(msg, gid):
 
         await asyncio.sleep(2)
 
-# ================= 패널 =================
+# 🎛 패널
 class Panel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -119,23 +119,23 @@ class Panel(discord.ui.View):
 
         await i.response.send_message(embed=emb, ephemeral=True)
 
-# ================= 검색 =================
+# 🔍 검색 (🔥 나만 보기)
 class Search(discord.ui.Modal, title="검색"):
     query = discord.ui.TextInput(label="검색어")
 
     async def on_submit(self, i):
-        await i.response.defer()
+        await i.response.defer(ephemeral=True)
 
         data = await extract(f"ytsearch5:{self.query}")
         res = data["entries"]
 
-        v = discord.ui.View(timeout=None)
+        v = discord.ui.View(timeout=60)
 
         for r in res:
             b = discord.ui.Button(label=r["title"][:20])
 
             async def cb(inter, r=r):
-                await inter.response.defer()
+                await inter.response.defer(ephemeral=True)
 
                 if not inter.user.voice:
                     return await inter.followup.send("❌ 음성채널 들어가", ephemeral=True)
@@ -155,9 +155,9 @@ class Search(discord.ui.Modal, title="검색"):
             b.callback = cb
             v.add_item(b)
 
-        await i.followup.send("🎬 검색 결과", view=v)
+        await i.followup.send("🎬 검색 결과 (나만 보기)", view=v, ephemeral=True)
 
-# ================= 재생 =================
+# ▶ 재생
 async def play_next(i):
     k = i.guild.id
     vc = i.guild.voice_client
@@ -184,7 +184,7 @@ async def play_next(i):
     msg = await i.channel.send(embed=make_embed(song, 0))
     client.loop.create_task(update(msg, k))
 
-# ================= 패널 생성 =================
+# 🎛 패널 생성
 async def send_panel(ch, gid):
     s = get_settings(gid)
 
@@ -207,7 +207,7 @@ async def send_panel(ch, gid):
     s["panel_msg"] = msg.id
     save_settings(settings)
 
-# ================= setup =================
+# ⚙ setup
 @tree.command(name="setup")
 async def setup(i: discord.Interaction):
     g = i.guild
@@ -223,7 +223,7 @@ async def setup(i: discord.Interaction):
     await send_panel(tc, g.id)
     await i.response.send_message("✅ 완료", ephemeral=True)
 
-# ================= 실행 =================
+# 🚀 실행
 @client.event
 async def on_ready():
     print("🔥 실행됨")
@@ -233,7 +233,7 @@ async def on_ready():
 
     try:
         synced = await tree.sync()
-        print(f"✅ 글로벌 명령어 {len(synced)}개 등록됨")
+        print(f"✅ 명령어 {len(synced)}개 등록됨")
     except Exception as e:
         print("❌", e)
 
